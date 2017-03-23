@@ -10,17 +10,17 @@
 #define RTC_BASE 64	// RTC memory: 64-512 range is userspace
 #define WEB_TIMEOUT 120	// web config timeout in seconds
 
-// Store those in RTC as this is faster than EPPROM
-struct RTC_PARAMS {
-	int rtcStore = 0xABCD;	// Magic sequence
+// Store those EPPROM
+struct EPPROM_PARAMS {
+	int magic = 0xABCD;		// Magic sequence
 	IPAddress ip;			// ip params to speed up Wifi connection
 	IPAddress gw;
 	IPAddress subnet;
 	IPAddress dns;
 	char host[40];			// pimusic host that accepts requests http://pimusic/music.php?id=XXYYZZFF
-} rtcParams;
+} eppromParams;
 
-void send_to_pimusic(String id);
+bool send_to_pimusic(String id);
 bool configure_wifi(bool bForce);
 
 //flag for saving pimusic name
@@ -32,15 +32,26 @@ void saveConfigCallback() {
 }
 
 // the setup function runs once when you press reset or power the board
-void setup() {
+void setup() 
+{
+	// wdt_disable();
+
 	Serial.begin(115200);	// Initialize serial communications with Pro Mini
-	while (!Serial);		// Do nothing if no serial port is opened (added for Arduinos based on ATMEGA32U4)
-//	return;
-	system_rtc_mem_read(RTC_BASE, &rtcParams, sizeof(rtcParams));
-	if (rtcParams.rtcStore != 0xABCD)  // cold start, magic number is nor present
+	while (!Serial) yield();		// Do nothing if no serial port is opened (added for Arduinos based on ATMEGA32U4)
+	Serial.println("ABCDEF");
+
+	EEPROM.begin(sizeof(eppromParams));
+	uint8_t *mem = (uint8_t *) &eppromParams;
+	for (size_t i = 0; i < sizeof(eppromParams); i++)
+	{
+		*mem++ = EEPROM.read(i);
+	}
+
+	if (eppromParams.magic != 0xABCD)  // first run - let's config
 	{
 		// check if wifi needs to be configured
-		configure_wifi(false);
+		strcpy(eppromParams.host, "pimusic.ab.lan");
+		configure_wifi(true);
 	}
 	else
 	{
@@ -53,7 +64,12 @@ void setup() {
 		// report fatal error to ProMini
 		Serial.println("error: Wifi is disconnected!");
 	}
+	else {
+		Serial.println("Wifi is connected!");
+	}
+
 	Serial.flush();
+	// delay(100);
 	// go to the deep sleep untill MiniPro sends the reset
 	ESP.deepSleep(0, RF_DEFAULT);
 }
@@ -67,25 +83,12 @@ void loop() {
 bool configure_wifi(bool bForce) {
 	// test wifi connection
 	WiFiManager wifiManager;
+	wifiManager.setDebugOutput(false);
 	bool bRet;
 
 	if(bForce) wifiManager.resetSettings();
 
-	// add pimusic parameter
-	EEPROM.begin(sizeof(rtcParams.host));
-	for (size_t i = 0; i <= sizeof(rtcParams.host); i++)
-	{
-		rtcParams.host[i] = EEPROM.read(i);
-		if (rtcParams.host[i] == 0) break;
-		if (!isAscii(rtcParams.host[i]))
-		{
-			rtcParams.host[i] = 0;
-			break;
-		}
-	}
-	if(rtcParams.host[0]==0) strcpy(rtcParams.host, "pimusic.ab.lan");
-
-	WiFiManagerParameter custom_pimusic_server("pimusic", "music server", rtcParams.host, 40);
+	WiFiManagerParameter custom_pimusic_server("pimusic", "music server", eppromParams.host, 40);
 	wifiManager.setSaveConfigCallback(saveConfigCallback);
 	wifiManager.addParameter(&custom_pimusic_server);
 
@@ -94,39 +97,41 @@ bool configure_wifi(bool bForce) {
 	if (!bRet)
 		return(bRet);
 
-	rtcParams.ip = WiFi.localIP();
-	rtcParams.gw = WiFi.gatewayIP();
-	rtcParams.subnet = WiFi.subnetMask();
-	rtcParams.dns = WiFi.dnsIP();
-	strcpy(rtcParams.host, custom_pimusic_server.getValue());
-	rtcParams.rtcStore = 0xABCD;
-	system_rtc_mem_write(RTC_BASE, &rtcParams, sizeof(rtcParams));
+	eppromParams.ip = WiFi.localIP();
+	eppromParams.gw = WiFi.gatewayIP();
+	eppromParams.subnet = WiFi.subnetMask();
+	eppromParams.dns = WiFi.dnsIP();
+	strcpy(eppromParams.host, custom_pimusic_server.getValue());
+	eppromParams.magic = 0xABCD;
+
+	// check connection to pimusic
+	WiFiClient client;
+	const int httpPort = 80;
+	if (!client.connect(eppromParams.host, httpPort)) {
+		return false;
+	}
 
 	if (shouldSaveConfig)
 	{
-		for (size_t i = 0; i <= sizeof(rtcParams.host); i++)
+		uint8_t *buf = (uint8_t *)&eppromParams;
+		for (size_t i = 0; i < sizeof(eppromParams); i++)
 		{
-			EEPROM.write(i, (uint8_t)(rtcParams.host[i]));
+			EEPROM.write(i, *buf++);
 		}
 		EEPROM.commit();
 	}
 	return(bRet);
 }
 
-void send_to_pimusic(String id)
+bool send_to_pimusic(String id)
 {
-	const uint8_t bssid[] = { 0x80,0x2A,0xA8,0xD1,0x5E,0x6F };
-	Serial.begin(115200);	// Initialize serial communications with the PC
-	while (!Serial);		// Do nothing if no serial port is opened (added for Arduinos based on ATMEGA32U4)
-	Serial.println("");
+	const uint8_t bssid[6] = { 0x80,0x2A,0xA8,0xD1,0x5E,0x6F };
+
+	WiFi.config(eppromParams.ip, eppromParams.gw, eppromParams.subnet, eppromParams.dns);
 	WiFi.mode(WIFI_STA);
-
-	Serial.print("host: ");
-	Serial.println(rtcParams.host);
-
-	WiFi.config(rtcParams.ip, rtcParams.gw, rtcParams.subnet, rtcParams.dns);
-	//WiFi.begin(ssid, password, 1, bssid, true);
-	WiFi.begin();
+	//WiFi.begin("ABLUCERNE", "veeam123", 1, bssid, true);
+	//WiFi.begin();
+	WiFi.reconnect();
 
 	for (int i = 0; i<30; i++) {
 		if (WiFi.status() != WL_CONNECTED) {
@@ -136,30 +141,27 @@ void send_to_pimusic(String id)
 	}
 	if (WiFi.status() != WL_CONNECTED)
 	{
-		return;
+		return false;
 	}
-	//WiFi.disconnect();
-	Serial.println("WiFi connected");
-	Serial.println("IP address: ");
-	Serial.println(WiFi.localIP());
-	Serial.println(WiFi.BSSIDstr());
+
+	//Serial.println("WiFi connected");
+	//Serial.println("IP address: ");
+	//Serial.println(WiFi.localIP());
+	//Serial.println(WiFi.BSSIDstr());
 
 	// Use WiFiClient class to create TCP connections
 	WiFiClient client;
 	const int httpPort = 80;
-	if (!client.connect(rtcParams.host, httpPort)) {
-		Serial.println("connection failed");
-		return;
+	if (!client.connect(eppromParams.host, httpPort)) {
+		return false;
 	}
 
 	// We now create a URI for the request
 	String url = "/music.php?id=" + id;
-	//Serial.print("Requesting URL: ");
-	//Serial.println(url);
 
 	// This will send the request to the server
 	client.print(String("GET ") + url + " HTTP/1.1\r\n" +
-		"Host: " + rtcParams.host + "\r\n" +
+		"Host: " + eppromParams.host + "\r\n" +
 		"Connection: close\r\n\r\n");
-	//WiFi.disconnect();
+	return true;
 }
