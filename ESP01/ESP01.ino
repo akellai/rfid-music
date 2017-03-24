@@ -13,15 +13,16 @@
 #define RTC_BASE 64	// RTC memory: 64-512 range is userspace
 #define WEB_TIMEOUT 120	// web config timeout in seconds
 
-// Store those EPPROM
-struct EPPROM_PARAMS {
+// Store those EEPROM
+struct EEPROM_PARAMS {
 	int magic = 0xABCD;		// Magic sequence AA55
 	IPAddress ip;			// ip params to speed up Wifi connection
 	IPAddress gw;
 	IPAddress subnet;
 	IPAddress dns;
 	char host[40];			// pimusic host that accepts requests http://pimusic/music.php?id=XXYYZZFF
-	int channel;
+	uint8 bssid[6];			// BSSID for faster connection
+	bool bretry = false;
 } eepromParams;
 
 bool send_to_pimusic(String id);
@@ -145,6 +146,7 @@ bool configure_wifi(bool bForce) {
 	eepromParams.dns = WiFi.dnsIP();
 	strcpy(eepromParams.host, custom_pimusic_server.getValue());
 	eepromParams.magic = 0xABCD;
+	eepromParams.bretry = true;
 
 	// check connection to pimusic
 	WiFiClient client;
@@ -161,43 +163,61 @@ bool configure_wifi(bool bForce) {
 
 bool connect(bool binit)
 {
-	char ssid[40];
-	char password[40];
+	bool bret = false;
+	struct station_config conf;
 
 	if (WiFi.isConnected())
 		return true;
 
 	WiFi.mode(WIFI_STA);
-	WiFi.SSID().toCharArray(ssid, sizeof(ssid));
-	WiFi.psk().toCharArray(password, sizeof(password));
+	WiFi.persistent(false);
+	wifi_station_get_config(&conf);
 
-	if (binit)
+	if (binit | eepromParams.bretry)
+		eepromParams.bretry = true;
+
+	if (eepromParams.bretry)
 	{
-		WiFi.begin();
+		WiFi.begin((char*)conf.ssid, (char*)conf.password, 0, NULL, true);
 	}
 	else
 	{
 		WiFi.config(eepromParams.ip, eepromParams.gw, eepromParams.subnet, eepromParams.dns);
-		WiFi.begin(ssid, password, WiFi.channel(), WiFi.BSSID(), true);
+		WiFi.begin((char*)conf.ssid, (char*)conf.password, 0, eepromParams.bssid, true);
 	}
 
 	for (int i = 0; i<40; i++) {
 		if (WiFi.status() != WL_CONNECTED) {
-			if (i == 10)		// after 10 seconds try to reconnect with channel rescan
-				WiFi.begin();
 			delay(100);
 			Serial.print(".");
 		}
 	}
-	if (WiFi.isConnected() && binit)
+
+	bret = WiFi.isConnected();
+	if (bret)
 	{
-		eepromParams.ip = WiFi.localIP();
-		eepromParams.gw = WiFi.gatewayIP();
-		eepromParams.subnet = WiFi.subnetMask();
-		eepromParams.dns = WiFi.dnsIP();
-		SaveEeprom();
+		if (eepromParams.bretry)
+		{
+			// store BSSID for successful connection
+			memcpy((void *)&eepromParams.bssid[0], (void *)WiFi.BSSID(), 6);
+			eepromParams.ip = WiFi.localIP();
+			eepromParams.gw = WiFi.gatewayIP();
+			eepromParams.subnet = WiFi.subnetMask();
+			eepromParams.dns = WiFi.dnsIP();
+			eepromParams.bretry = false;
+			SaveEeprom();
+		}
 	}
-	return(WiFi.isConnected());
+	else
+	{
+		if (!eepromParams.bretry)
+		{
+			eepromParams.bretry = true;
+			SaveEeprom();
+		}
+	}
+
+	return(bret);
 }
 
 bool send_to_pimusic(String url)
