@@ -86,7 +86,11 @@
     </None>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="simpleserial.h" />
     <ClInclude Include="__vm\.ESP01.vsarduino.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="simpleserial.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

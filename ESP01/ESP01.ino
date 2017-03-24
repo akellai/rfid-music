@@ -3,25 +3,33 @@
  Created:	3/21/2017 4:54:55 PM
  Author:	ab
 */
+#include "simpleserial.h"
 #include <ESP8266WiFi.h>
 #include <WiFiManager.h>         //https://github.com/tzapu/WiFiManager
 #include <EEPROM.h>
+
+#include "simpleserial.h"
 
 #define RTC_BASE 64	// RTC memory: 64-512 range is userspace
 #define WEB_TIMEOUT 120	// web config timeout in seconds
 
 // Store those EPPROM
 struct EPPROM_PARAMS {
-	int magic = 0xABCD;		// Magic sequence
+	int magic = 0xABCD;		// Magic sequence AA55
 	IPAddress ip;			// ip params to speed up Wifi connection
 	IPAddress gw;
 	IPAddress subnet;
 	IPAddress dns;
 	char host[40];			// pimusic host that accepts requests http://pimusic/music.php?id=XXYYZZFF
-} eppromParams;
+	int channel;
+} eepromParams;
 
 bool send_to_pimusic(String id);
 bool configure_wifi(bool bForce);
+bool connect(bool binit);
+
+// serial port
+SimpleSerial *serial;
 
 //flag for saving pimusic name
 bool shouldSaveConfig = false;
@@ -34,43 +42,68 @@ void saveConfigCallback() {
 // the setup function runs once when you press reset or power the board
 void setup() 
 {
-	// wdt_disable();
+	COMMAND cmd;
+	uint8_t *mem = (uint8_t *)&eepromParams;
 
 	Serial.begin(115200);	// Initialize serial communications with Pro Mini
-	while (!Serial) yield();		// Do nothing if no serial port is opened (added for Arduinos based on ATMEGA32U4)
-	Serial.println("ABCDEF");
-
-	EEPROM.begin(sizeof(eppromParams));
-	uint8_t *mem = (uint8_t *) &eppromParams;
-	for (size_t i = 0; i < sizeof(eppromParams); i++)
+	EEPROM.begin(sizeof(eepromParams));
+	for (size_t i = 0; i < sizeof(eepromParams); i++)
 	{
 		*mem++ = EEPROM.read(i);
 	}
 
-	if (eppromParams.magic != 0xABCD)  // first run - let's config
+	if (eepromParams.magic != 0xABCD)  // first run - let's config
 	{
 		// check if wifi needs to be configured
-		strcpy(eppromParams.host, "pimusic.ab.lan");
+		strcpy(eepromParams.host, "pimusic.ab.lan");
 		configure_wifi(true);
 	}
 	else
 	{
-		send_to_pimusic("00000000");
-		Serial.println("Wifi is ready!");
-	}
+		while (!Serial) yield();		// Do nothing if no serial port is opened (added for Arduinos based on ATMEGA32U4)
+		serial = new SimpleSerial(Serial);
+		serial->setTimeout(500);
 
-	if( !WiFi.isConnected() )
-	{
-		// report fatal error to ProMini
-		Serial.println("error: Wifi is disconnected!");
+		serial->sendCmd("u");	//report ready
+		if (serial->recieveCmd(cmd)) {
+			if (cmd.cmd == "p") {
+				serial->sendCmd("u");	// pong
+			}
+			else if (cmd.cmd == "i") { // i - init WiFi using web(force) autoconfig
+				configure_wifi(true);
+				if (WiFi.isConnected())
+					serial->sendCmd("u");
+				else
+					serial->sendCmd("d");
+			}
+			else if (cmd.cmd == "c") { //  c - connect WiFi
+				if (connect(true))	// this should renew dhcp and BSSID?
+					serial->sendCmd("u");
+				else
+					serial->sendCmd("d");
+			}
+			else if (cmd.cmd == "r") {  // r - reconnect WiFi (fast)
+				if (connect(false))
+					serial->sendCmd("u");
+				else
+					serial->sendCmd("d");
+			}
+			else if (cmd.cmd == "t") {  // t:id - transmit ID to pimusic (t:XXYYZZFF)
+				if (send_to_pimusic("/music.php?id=" + cmd.param))
+					serial->sendCmd("u");
+				else
+					serial->sendCmd("d");
+			}
+			else if (cmd.cmd == "b") {  // b:xx - transmit battery readings (b:XXXXXX), XXXXXX is ascii reading
+				if (send_to_pimusic("/battery.php?id=" + cmd.param))
+					serial->sendCmd("u");
+				else
+					serial->sendCmd("d");
+			}
+		}
 	}
-	else {
-		Serial.println("Wifi is connected!");
-	}
-
+	serial->sendCmd("q");
 	Serial.flush();
-	// delay(100);
-	// go to the deep sleep untill MiniPro sends the reset
 	ESP.deepSleep(0, RF_DEFAULT);
 }
 
@@ -80,15 +113,24 @@ void loop() {
 	delay(1000);
 }
 
+void SaveEeprom()
+{
+	uint8_t *buf = (uint8_t *)&eepromParams;
+	for (size_t i = 0; i < sizeof(eepromParams); i++)
+	{
+		EEPROM.write(i, *buf++);
+	}
+	EEPROM.commit();
+}
+
 bool configure_wifi(bool bForce) {
-	// test wifi connection
 	WiFiManager wifiManager;
 	wifiManager.setDebugOutput(false);
 	bool bRet;
 
 	if(bForce) wifiManager.resetSettings();
 
-	WiFiManagerParameter custom_pimusic_server("pimusic", "music server", eppromParams.host, 40);
+	WiFiManagerParameter custom_pimusic_server("pimusic", "music server", eepromParams.host, 40);
 	wifiManager.setSaveConfigCallback(saveConfigCallback);
 	wifiManager.addParameter(&custom_pimusic_server);
 
@@ -97,71 +139,82 @@ bool configure_wifi(bool bForce) {
 	if (!bRet)
 		return(bRet);
 
-	eppromParams.ip = WiFi.localIP();
-	eppromParams.gw = WiFi.gatewayIP();
-	eppromParams.subnet = WiFi.subnetMask();
-	eppromParams.dns = WiFi.dnsIP();
-	strcpy(eppromParams.host, custom_pimusic_server.getValue());
-	eppromParams.magic = 0xABCD;
+	eepromParams.ip = WiFi.localIP();
+	eepromParams.gw = WiFi.gatewayIP();
+	eepromParams.subnet = WiFi.subnetMask();
+	eepromParams.dns = WiFi.dnsIP();
+	strcpy(eepromParams.host, custom_pimusic_server.getValue());
+	eepromParams.magic = 0xABCD;
 
 	// check connection to pimusic
 	WiFiClient client;
-	const int httpPort = 80;
-	if (!client.connect(eppromParams.host, httpPort)) {
+	if (!client.connect(eepromParams.host, 80)) {
 		return false;
 	}
 
 	if (shouldSaveConfig)
 	{
-		uint8_t *buf = (uint8_t *)&eppromParams;
-		for (size_t i = 0; i < sizeof(eppromParams); i++)
-		{
-			EEPROM.write(i, *buf++);
-		}
-		EEPROM.commit();
+		SaveEeprom();
 	}
 	return(bRet);
 }
 
-bool send_to_pimusic(String id)
+bool connect(bool binit)
 {
-	const uint8_t bssid[6] = { 0x80,0x2A,0xA8,0xD1,0x5E,0x6F };
+	char ssid[40];
+	char password[40];
 
-	WiFi.config(eppromParams.ip, eppromParams.gw, eppromParams.subnet, eppromParams.dns);
+	if (WiFi.isConnected())
+		return true;
+
 	WiFi.mode(WIFI_STA);
-	//WiFi.begin("ABLUCERNE", "veeam123", 1, bssid, true);
-	//WiFi.begin();
-	WiFi.reconnect();
+	WiFi.SSID().toCharArray(ssid, sizeof(ssid));
+	WiFi.psk().toCharArray(password, sizeof(password));
 
-	for (int i = 0; i<30; i++) {
+	if (binit)
+	{
+		WiFi.begin();
+	}
+	else
+	{
+		WiFi.config(eepromParams.ip, eepromParams.gw, eepromParams.subnet, eepromParams.dns);
+		WiFi.begin(ssid, password, WiFi.channel(), WiFi.BSSID(), true);
+	}
+
+	for (int i = 0; i<40; i++) {
 		if (WiFi.status() != WL_CONNECTED) {
+			if (i == 10)		// after 10 seconds try to reconnect with channel rescan
+				WiFi.begin();
 			delay(100);
 			Serial.print(".");
 		}
 	}
-	if (WiFi.status() != WL_CONNECTED)
+	if (WiFi.isConnected() && binit)
 	{
-		return false;
+		eepromParams.ip = WiFi.localIP();
+		eepromParams.gw = WiFi.gatewayIP();
+		eepromParams.subnet = WiFi.subnetMask();
+		eepromParams.dns = WiFi.dnsIP();
+		SaveEeprom();
 	}
+	return(WiFi.isConnected());
+}
 
-	//Serial.println("WiFi connected");
-	//Serial.println("IP address: ");
-	//Serial.println(WiFi.localIP());
-	//Serial.println(WiFi.BSSIDstr());
-
+bool send_to_pimusic(String url)
+{
 	// Use WiFiClient class to create TCP connections
 	WiFiClient client;
-	const int httpPort = 80;
-	if (!client.connect(eppromParams.host, httpPort)) {
+
+	if (!connect(false))
+		return false;
+
+	if (!client.connect(eepromParams.host, 80)) {
 		return false;
 	}
-
-	// We now create a URI for the request
-	String url = "/music.php?id=" + id;
 
 	// This will send the request to the server
 	client.print(String("GET ") + url + " HTTP/1.1\r\n" +
-		"Host: " + eppromParams.host + "\r\n" +
+		"Host: " + eepromParams.host + "\r\n" +
 		"Connection: close\r\n\r\n");
 	return true;
 }
