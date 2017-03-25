@@ -46,7 +46,7 @@ void setup()
 	COMMAND cmd;
 	uint8_t *mem = (uint8_t *)&eepromParams;
 
-	Serial.begin(115200);	// Initialize serial communications with Pro Mini
+	Serial.begin(19200);	// Initialize serial communications with Pro Mini
 	EEPROM.begin(sizeof(eepromParams));
 	for (size_t i = 0; i < sizeof(eepromParams); i++)
 	{

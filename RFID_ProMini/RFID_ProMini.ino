@@ -40,20 +40,94 @@ Author:	ab
 * SPI SCK     SCK          13 / ICSP-3   52        D13        ICSP-3           15
 */
 
-// NOTE: pinout is Arduino Nano v3!!!
-
+// NOTE: pinout is Arduino Nano v3
+#include <SoftwareSerial.h>
 #include <LowPower.h>
 #include <SPI.h>
 #include <MFRC522.h>
+#include "simpleserial.h"
 
 #define RST_PIN         9          // Configurable, see typical pin layout above
 #define SS_PIN          10         // Configurable, see typical pin layout above
+#define ESP_ENABLE_PIN  4
 
 MFRC522 mfrc522(SS_PIN, RST_PIN);  // Create MFRC522 instance
+								   // serial port
+SimpleSerial *simpleserial;
+COMMAND command;
+
+//SoftwareSerial Serial1(PIN3, PIN2);
+SoftwareSerial Serial1(PIN6, PIN5);
+
+bool sendtoESP(String cmd, String param)
+{
+	bool bres = false;
+	// wake up ESP
+	pinMode(ESP_ENABLE_PIN, OUTPUT);
+	digitalWrite(ESP_ENABLE_PIN, LOW);
+	delay(5);
+	digitalWrite(ESP_ENABLE_PIN, HIGH);
+	delay(5);
+
+	while (true)
+	{
+		if (Serial1.available())
+			Serial.write(Serial1.read());
+	}
+
+	simpleserial->sendCmd("u");	//report ready
+	// wait for "u"
+	while (!simpleserial->recieveCmd(command))
+	{
+		if (command.cmd != "u")
+		{
+			return false;
+		}
+	}
+	// ready to send command
+	simpleserial->sendCmd(cmd,param);
+	// get answer
+	for (int i = 0; i < 5;i++ )
+	{
+		if (!simpleserial->recieveCmd(command))
+		{
+			Serial.println(command.cmd + ":" + command.param);
+			if (command.cmd == "u")
+			{
+				bres = true;
+				break;
+			}
+			else if (command.cmd == "d")
+				break;
+			return false;
+		}
+		Serial.println("waiting");
+	}
+	// shortly after expect 'q'
+	if (simpleserial->recieveCmd(command))
+	{
+		if (command.cmd == "q")
+		{
+			// the result is ok!
+			return bres;
+		}
+		Serial.println(command.cmd + ":" + command.param);
+	}
+	return false;
+}
 
 void setup() {
+	Serial1.begin(19200);	// 115200 is too high https://forum.mysensors.org/topic/1483/trouble-with-115200-baud-on-3-3v-8mhz-arduino-like-serial-gateway-solution-change-baudrate
+	simpleserial = new SimpleSerial(Serial1);
+	bool cmdresult;
+
 	Serial.begin(115200);		// Initialize serial communications with the PC
-	while (!Serial);		// Do nothing if no serial port is opened (added for Arduinos based on ATMEGA32U4)
+	while (!Serial) delay(1);		// Do nothing if no serial port is opened (added for Arduinos based on ATMEGA32U4)
+	Serial.println("START");
+	cmdresult = sendtoESP("p","");
+	Serial.println(cmdresult);
+	Serial.println("END");
+
 	SPI.begin();			// Init SPI bus
 	pinMode(SS_PIN, OUTPUT);
 	digitalWrite(SS_PIN, HIGH);
