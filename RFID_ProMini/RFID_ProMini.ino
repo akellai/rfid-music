@@ -55,6 +55,7 @@ MFRC522 mfrc522(SS_PIN, RST_PIN);  // Create MFRC522 instance
 
 //SoftwareSerial Serial1(PIN3, PIN2);
 SoftwareSerial Serial1(PIN6, PIN5);
+int ticks = 0;
 
 void startecho()
 {
@@ -155,13 +156,30 @@ void setup() {
 	mfrc522.PCD_Reset();
 }
 
+void burn8Readings(int pin)
+{
+	for (int i = 0; i < 8; i++)
+	{
+		analogRead(pin);
+		delay(5);
+	}
+}
+
+String measurepower()
+{
+	analogReference(INTERNAL);    // set the ADC reference to 1.1V
+	burn8Readings(A2);            // make 8 readings but don't use them
+	delay(10);                    // idle some time
+	return String(analogRead(A2));    // read actual value
+}
+
 void loop() {
+	ticks++;
 	//pinMode(SS_PIN, OUTPUT);
 	//digitalWrite(SS_PIN, HIGH);
 
 	//pinMode(RST_PIN, OUTPUT);
 	digitalWrite(RST_PIN, HIGH);
-
 	//mfrc522.PCD_Reset();
 	mfrc522.PCD_WriteRegister(mfrc522.TModeReg, 0x80);			// TAuto=1; timer starts automatically at the end of the transmission in all communication modes at all speeds
 	mfrc522.PCD_WriteRegister(mfrc522.TPrescalerReg, 0x43);		// 10μs.
@@ -177,6 +195,11 @@ void loop() {
 	if (!mfrc522.PICC_IsNewCardPresent()) {
 		// put NFC to sleep
 		mfrc522.PCD_WriteRegister(mfrc522.CommandReg, mfrc522.PCD_NoCmdChange | 0x10);
+		if (ticks > 2 * 60 * 60)
+		{
+			ticks = 0;
+			sendtoESP("b", measurepower());
+		}
 	}
 	else
 	{
@@ -199,9 +222,9 @@ void loop() {
 	}
 	// Enter power down state for 1 s with ADC and BOD module disabled
 	//delay(1000);
-	digitalWrite(RST_PIN, LOW);
 	Serial.flush();
 	Serial1.flush();
+	digitalWrite(RST_PIN, LOW);
 	LowPower.powerDown(SLEEP_1S, ADC_OFF, BOD_OFF);
 	//	LowPower.powerDown(SLEEP_60MS, ADC_OFF, BOD_OFF);
 }
