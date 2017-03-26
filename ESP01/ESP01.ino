@@ -64,9 +64,10 @@ void setup()
 		while (!Serial) yield();		// Do nothing if no serial port is opened (added for Arduinos based on ATMEGA32U4)
 		serial = new SimpleSerial(Serial);
 		serial->setTimeout(500);
-
+		Serial.println("--INIT--");
 		serial->sendCmd("u");	//report ready
 		if (serial->recieveCmd(cmd)) {
+			delay(1);
 			if (cmd.cmd == "p") {
 				serial->sendCmd("u");	// pong
 			}
@@ -103,6 +104,7 @@ void setup()
 			}
 		}
 	}
+	delay(1);
 	serial->sendCmd("q");
 	Serial.flush();
 	ESP.deepSleep(0, RF_DEFAULT);

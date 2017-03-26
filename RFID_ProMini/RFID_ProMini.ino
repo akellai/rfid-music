@@ -52,87 +52,114 @@ Author:	ab
 #define ESP_ENABLE_PIN  4
 
 MFRC522 mfrc522(SS_PIN, RST_PIN);  // Create MFRC522 instance
-								   // serial port
-SimpleSerial *simpleserial;
-COMMAND command;
 
 //SoftwareSerial Serial1(PIN3, PIN2);
 SoftwareSerial Serial1(PIN6, PIN5);
 
-bool sendtoESP(String cmd, String param)
+void startecho()
 {
-	bool bres = false;
-	// wake up ESP
-	pinMode(ESP_ENABLE_PIN, OUTPUT);
-	digitalWrite(ESP_ENABLE_PIN, LOW);
-	delay(5);
-	digitalWrite(ESP_ENABLE_PIN, HIGH);
-	delay(5);
-
 	while (true)
 	{
 		if (Serial1.available())
 			Serial.write(Serial1.read());
 	}
+}
 
-	simpleserial->sendCmd("u");	//report ready
-	// wait for "u"
-	while (!simpleserial->recieveCmd(command))
+#include <avr/wdt.h>
+
+void softwareReset(uint8_t prescaller) {
+	// start watchdog with the provided prescaller
+	wdt_enable(prescaller);
+	// wait for the prescaller time to expire
+	// without sending the reset signal by using
+	// the wdt_reset() method
+	while (1) {}
+}
+
+bool sendtoESP(String cmd, String param)
+{
+	SimpleSerial simpleserial(Serial1);
+	COMMAND command;
+	bool bres = false;
+
+	// reset ESP
+	digitalWrite(ESP_ENABLE_PIN, LOW);
+	delay(300);
+	digitalWrite(ESP_ENABLE_PIN, HIGH);
+	Serial1.begin(19200);
+
+	//startecho();
+	// wait for the 'y' command for 2 seconds
+
+	simpleserial.setTimeout(200);
+	for(int i=0;i<2;i++)
 	{
-		if (command.cmd != "u")
+		if (!simpleserial.recieveCmd(command))
+			continue;
+		if (command.cmd == "u")
 		{
-			return false;
+			bres = true;
+			break;
 		}
+		return false;
 	}
+	if (!bres)
+		return bres;
+
+	//Serial1.setTimeout(200);
+	//Serial.println(Serial1.readStringUntil('\r'));
+	//Serial.println(Serial1.readStringUntil('\r'));
+
 	// ready to send command
-	simpleserial->sendCmd(cmd,param);
+	simpleserial.sendCmd(cmd,param);
+	//delay(10);
+	//startecho();
 	// get answer
-	for (int i = 0; i < 5;i++ )
+	Serial1.setTimeout(1000);
+	for (int i = 0; i < 5; i++)
 	{
-		if (!simpleserial->recieveCmd(command))
+		if (!simpleserial.recieveCmd(command))
+			continue;
+
+		if (command.cmd == "u")
+			bres = true;
+		else if (command.cmd == "d")
+			break;
+		else if (command.cmd == "q")
 		{
-			Serial.println(command.cmd + ":" + command.param);
-			if (command.cmd == "u")
-			{
-				bres = true;
-				break;
-			}
-			else if (command.cmd == "d")
-				break;
-			return false;
-		}
-		Serial.println("waiting");
-	}
-	// shortly after expect 'q'
-	if (simpleserial->recieveCmd(command))
-	{
-		if (command.cmd == "q")
-		{
-			// the result is ok!
+			//softwareReset(WDTO_15MS);
+			Serial1.end();
 			return bres;
 		}
-		Serial.println(command.cmd + ":" + command.param);
+		else
+			break;
 	}
+	Serial1.end();
 	return false;
 }
 
 void setup() {
-	Serial1.begin(19200);	// 115200 is too high https://forum.mysensors.org/topic/1483/trouble-with-115200-baud-on-3-3v-8mhz-arduino-like-serial-gateway-solution-change-baudrate
-	simpleserial = new SimpleSerial(Serial1);
-	bool cmdresult;
-
 	Serial.begin(115200);		// Initialize serial communications with the PC
 	while (!Serial) delay(1);		// Do nothing if no serial port is opened (added for Arduinos based on ATMEGA32U4)
-	Serial.println("START");
-	cmdresult = sendtoESP("p","");
-	Serial.println(cmdresult);
-	Serial.println("END");
 
+	pinMode(ESP_ENABLE_PIN, OUTPUT);
+
+	// init reader
 	SPI.begin();			// Init SPI bus
 	pinMode(SS_PIN, OUTPUT);
 	digitalWrite(SS_PIN, HIGH);
 
 	pinMode(RST_PIN, OUTPUT);
+	digitalWrite(RST_PIN, HIGH);
+
+	mfrc522.PCD_Reset();
+}
+
+void loop() {
+	//pinMode(SS_PIN, OUTPUT);
+	//digitalWrite(SS_PIN, HIGH);
+
+	//pinMode(RST_PIN, OUTPUT);
 	digitalWrite(RST_PIN, HIGH);
 
 	//mfrc522.PCD_Reset();
@@ -146,7 +173,7 @@ void setup() {
 
 	mfrc522.PCD_AntennaOn();						// Enable the antenna driver pins TX1 and TX2 (they were disabled by the reset)
 
-	delay(3);
+	// Look for new cards
 	if (!mfrc522.PICC_IsNewCardPresent()) {
 		// put NFC to sleep
 		mfrc522.PCD_WriteRegister(mfrc522.CommandReg, mfrc522.PCD_NoCmdChange | 0x10);
@@ -157,33 +184,24 @@ void setup() {
 		mfrc522.PCD_WriteRegister(mfrc522.CommandReg, mfrc522.PCD_NoCmdChange | 0x10);
 		if (status)
 		{
-			Serial.println("ready...");
+			//Serial.println("ready...");
 			// Now a card is selected. The UID and SAK is in mfrc522.uid.
 			// Dump UID
-			Serial.print(F("Card UID:"));
+			//Serial.print(F("Card UID:"));
 			String id = "";
 			for (byte i = 0; i < mfrc522.uid.size; i++) {
 				id = id + String(mfrc522.uid.uidByte[i], HEX);
 			}
-			Serial.print(id);
+			bool cmdresult = sendtoESP("t", id);
+			Serial.println(cmdresult);
+			Serial.println(id);
 		}
-		//Serial.println();
 	}
-}
-
-void loop() {
 	// Enter power down state for 1 s with ADC and BOD module disabled
-//	LowPower.powerDown(SLEEP_60MS, ADC_OFF, BOD_OFF);
-	LowPower.powerDown(SLEEP_60MS, ADC_OFF, BOD_OFF);
-
-	// Look for new cards
-	if (!mfrc522.PICC_IsNewCardPresent()) {
-		return;
-	}
-
-	// Select one of the cards
-	if (mfrc522.PICC_ReadCardSerial()) {
-		// Dump debug info about the card; PICC_HaltA() is automatically called
-		mfrc522.PICC_DumpToSerial(&(mfrc522.uid));
-	}
+	//delay(1000);
+	digitalWrite(RST_PIN, LOW);
+	Serial.flush();
+	Serial1.flush();
+	LowPower.powerDown(SLEEP_1S, ADC_OFF, BOD_OFF);
+	//	LowPower.powerDown(SLEEP_60MS, ADC_OFF, BOD_OFF);
 }
