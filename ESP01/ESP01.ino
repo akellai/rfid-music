@@ -61,8 +61,8 @@ void setup()
 	}
 	else
 	{
-		while (!Serial) yield();		// Do nothing if no serial port is opened (added for Arduinos based on ATMEGA32U4)
 		serial = new SimpleSerial(Serial);
+		while (!Serial) delay(1);		// Do nothing if no serial port is opened (added for Arduinos based on ATMEGA32U4)
 		serial->setTimeout(500);
 		Serial.println("--INIT--");
 		serial->sendCmd("u");	//report ready
@@ -134,7 +134,7 @@ bool configure_wifi(bool bForce) {
 	if(bForce) wifiManager.resetSettings();
 
 	WiFiManagerParameter custom_pimusic_server("pimusic", "music server", eepromParams.host, 40);
-	wifiManager.setSaveConfigCallback(saveConfigCallback);
+	//wifiManager.setSaveConfigCallback(saveConfigCallback);
 	wifiManager.addParameter(&custom_pimusic_server);
 
 	wifiManager.setConfigPortalTimeout(WEB_TIMEOUT);
@@ -156,11 +156,8 @@ bool configure_wifi(bool bForce) {
 		return false;
 	}
 
-	if (shouldSaveConfig)
-	{
-		SaveEeprom();
-	}
-	return(bRet);
+	SaveEeprom();
+	return bRet;
 }
 
 bool connect(bool binit)
