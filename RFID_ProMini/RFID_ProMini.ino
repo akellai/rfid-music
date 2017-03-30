@@ -42,6 +42,7 @@ Author:	ab
 
 // NOTE: pinout is Arduino Nano v3
 #include <SoftwareSerial.h>
+#include <avr/wdt.h>
 #include <LowPower.h>
 #include <SPI.h>
 #include <MFRC522.h>
@@ -54,7 +55,6 @@ Author:	ab
 
 MFRC522 mfrc522(SS_PIN, RST_PIN);  // Create MFRC522 instance
 
-//SoftwareSerial Serial1(PIN3, PIN2);
 SoftwareSerial Serial1(PIN6, PIN5);
 int ticks = 0;
 
@@ -65,17 +65,6 @@ void startecho()
 		if (Serial1.available())
 			Serial.write(Serial1.read());
 	}
-}
-
-#include <avr/wdt.h>
-
-void softwareReset(uint8_t prescaller) {
-	// start watchdog with the provided prescaller
-	wdt_enable(prescaller);
-	// wait for the prescaller time to expire
-	// without sending the reset signal by using
-	// the wdt_reset() method
-	while (1) {}
 }
 
 bool sendtoESP(String cmd, String param)
@@ -109,14 +98,9 @@ bool sendtoESP(String cmd, String param)
 	if (!bres)
 		return bres;
 
-	//Serial1.setTimeout(200);
-	//Serial.println(Serial1.readStringUntil('\r'));
-	//Serial.println(Serial1.readStringUntil('\r'));
-
 	// ready to send command
 	simpleserial.sendCmd(cmd,param);
-	//delay(10);
-	//startecho();
+
 	// get answer
 	Serial1.setTimeout(1000);
 	for (int i = 0; i < 5; i++)
@@ -130,7 +114,6 @@ bool sendtoESP(String cmd, String param)
 			break;
 		else if (command.cmd == "q")
 		{
-			//softwareReset(WDTO_15MS);
 			Serial1.end();
 			return bres;
 		}
@@ -147,15 +130,10 @@ void mfrc522_fast_Reset()
 	//mfrc522.PCD_Reset();
 	mfrc522.PCD_WriteRegister(mfrc522.TModeReg, 0x80);			// TAuto=1; timer starts automatically at the end of the transmission in all communication modes at all speeds
 	mfrc522.PCD_WriteRegister(mfrc522.TPrescalerReg, 0x43);		// 10μs.
-//	mfrc522.PCD_WriteRegister(mfrc522.TReloadRegH, 0x03);		// Reload timer with 0x3E8 = 1000, ie 25ms before timeout.
-//	mfrc522.PCD_WriteRegister(mfrc522.TReloadRegL, 0xE8);
 
-//  100 works!!!
-//	mfrc522.PCD_WriteRegister(mfrc522.TReloadRegH, 0x00);		// Reload timer with 0x064 = 100, ie 1ms before timeout.
-//	mfrc522.PCD_WriteRegister(mfrc522.TReloadRegL, 0x64);
-
-	mfrc522.PCD_WriteRegister(mfrc522.TReloadRegH, 0x00);		// Reload timer with 0x064 = 10, ie 0.3ms before timeout.
+	mfrc522.PCD_WriteRegister(mfrc522.TReloadRegH, 0x00);		// Reload timer with 0x064 = 30, ie 0.3ms before timeout.
 	mfrc522.PCD_WriteRegister(mfrc522.TReloadRegL, 0x1E);
+//	mfrc522.PCD_WriteRegister(mfrc522.TReloadRegL, 0x5);
 
 	mfrc522.PCD_WriteRegister(mfrc522.TxASKReg, 0x40);		// Default 0x00. Force a 100 % ASK modulation independent of the ModGsPReg register setting
 	mfrc522.PCD_WriteRegister(mfrc522.ModeReg, 0x3D);		// Default 0x3F. Set the preset value for the CRC coprocessor for the CalcCRC command to 0x6363 (ISO 14443-3 part 6.2.4)
@@ -172,39 +150,22 @@ void setup() {
 	pinMode(SS_PIN, OUTPUT);
 	pinMode(LED_PIN, OUTPUT);
 
-	/*// AB: TMP
-	digitalWrite(ESP_ENABLE_PIN, HIGH);
-	Serial1.begin(19200);
-	startecho();
-	*/
-
 	// init reader
 	SPI.begin();			// Init SPI bus
-	//SPI.beginTransaction(SPISettings(800000, MSBFIRST, SPI_MODE0));
-	//SPI.setClockDivider(SPI_CLOCK_DIV2);
-	//SPI.begin();			// Init SPI bus
+	//SPI.beginTransaction(SPISettings(2000000, MSBFIRST, SPI_MODE0));
+
 	digitalWrite(SS_PIN, HIGH);
 	digitalWrite(RST_PIN, HIGH);
 
 	mfrc522_fast_Reset();
-	//mfrc522.PCD_Reset();
 	if (mfrc522.PICC_IsNewCardPresent())
 	{
 		Serial.println("Initializing ESP-01");
-		// Init wifi network!
-		sendtoESP("i", "");
-		delay(120000);
+		// Init wifi network
+		sendtoESP("i", "");	// start AP and the web to reconfigure WiFi
+		delay(120000);		// allow 2 min to reconfigure WiFi
 	}
 
-}
-
-void burn8Readings(int pin)
-{
-	for (int i = 0; i < 8; i++)
-	{
-		analogRead(pin);
-		delay(5);
-	}
 }
 
 long readVcc() {
@@ -238,23 +199,10 @@ String measurepower()
 	return String(readVcc());
 }
 
-String measurepower2()
-{
-	analogReference(INTERNAL);    // set the ADC reference to 1.1V
-	burn8Readings(A2);            // make 8 readings but don't use them
-	delay(10);                    // idle some time
-	return String(analogRead(A2));    // read actual value
-}
-
 void loop() {
 	ticks++;
-	//pinMode(SS_PIN, OUTPUT);
-	//digitalWrite(SS_PIN, HIGH);
 
 	mfrc522.PCD_WriteRegister(mfrc522.CommandReg, mfrc522.PCD_NoCmdChange);
-	//mfrc522_fast_Reset();
-	//mfrc522.PCD_Reset();
-	//digitalWrite(RST_PIN, HIGH);
 
 	// Look for new cards
 	if (!mfrc522.PICC_IsNewCardPresent()) {
@@ -265,13 +213,12 @@ void loop() {
 		{
 			ticks = 0;
 			sendtoESP("b", measurepower());
-//			delay(500);
-//			sendtoESP("b", measurepower2());
 		}
 	}
 	else
 	{
 		bool status = mfrc522.PICC_ReadCardSerial();
+		Serial.println("got something");
 		mfrc522.PCD_WriteRegister(mfrc522.CommandReg, mfrc522.PCD_NoCmdChange | 0x10);
 		if (status)
 		{
@@ -288,13 +235,9 @@ void loop() {
 			Serial.println(id);
 		}
 	}
-	// Enter power down state for 1 s with ADC and BOD module disabled
-	//delay(1000);
-	//digitalWrite(RST_PIN, LOW);
 	Serial.flush();
 	Serial1.flush();
+	// Enter power down state for 1 s with ADC and BOD module disabled
 	LowPower.powerDown(SLEEP_1S, ADC_OFF, BOD_OFF);
-	//LowPower.powerDown(SLEEP_60MS, ADC_OFF, BOD_OFF);
-	// LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
-
+	//LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF);
 }
