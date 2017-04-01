@@ -127,13 +127,14 @@ bool sendtoESP(String cmd, String param)
 void mfrc522_fast_Reset()
 {
 	digitalWrite(RST_PIN, HIGH);
-	//mfrc522.PCD_Reset();
+	mfrc522.PCD_Reset();
 	mfrc522.PCD_WriteRegister(mfrc522.TModeReg, 0x80);			// TAuto=1; timer starts automatically at the end of the transmission in all communication modes at all speeds
 	mfrc522.PCD_WriteRegister(mfrc522.TPrescalerReg, 0x43);		// 10μs.
+//	mfrc522.PCD_WriteRegister(mfrc522.TPrescalerReg, 0x20);		// test
 
 	mfrc522.PCD_WriteRegister(mfrc522.TReloadRegH, 0x00);		// Reload timer with 0x064 = 30, ie 0.3ms before timeout.
 	mfrc522.PCD_WriteRegister(mfrc522.TReloadRegL, 0x1E);
-//	mfrc522.PCD_WriteRegister(mfrc522.TReloadRegL, 0x5);
+	//mfrc522.PCD_WriteRegister(mfrc522.TReloadRegL, 0x1E);
 
 	mfrc522.PCD_WriteRegister(mfrc522.TxASKReg, 0x40);		// Default 0x00. Force a 100 % ASK modulation independent of the ModGsPReg register setting
 	mfrc522.PCD_WriteRegister(mfrc522.ModeReg, 0x3D);		// Default 0x3F. Set the preset value for the CRC coprocessor for the CalcCRC command to 0x6363 (ISO 14443-3 part 6.2.4)
@@ -199,13 +200,72 @@ String measurepower()
 	return String(readVcc());
 }
 
+bool mfrc522_fastDetect()
+{
+	byte bufferATQA[2];
+	byte bufferSize = sizeof(bufferATQA);
+	MFRC522::StatusCode sta = mfrc522.PICC_RequestA(bufferATQA, &bufferSize);
+	return (sta == MFRC522::STATUS_OK || sta == MFRC522::STATUS_COLLISION);
+}
+
+bool mfrc522_fastDetect2()
+{
+	byte bufferATQA[2];
+	byte bufferSize = sizeof(bufferATQA);
+	MFRC522::StatusCode sta = mfrc522.PICC_RequestA(bufferATQA, &bufferSize);
+	return (sta != MFRC522::STATUS_TIMEOUT);
+}
+
+bool mfrc522_fastDetect3()
+{
+	byte validBits = 7;
+	MFRC522::StatusCode status;
+	byte command = MFRC522::PICC_CMD_REQA;
+	byte waitIRq = 0x30;		// RxIRq and IdleIRq
+	byte n;
+	uint16_t i;
+
+	mfrc522.PCD_ClearRegisterBitMask(MFRC522::CollReg, 0x80);		// ValuesAfterColl=1 => Bits received after collision are cleared.
+
+	//mfrc522.PCD_WriteRegister(MFRC522::CommandReg, MFRC522::PCD_Idle);			// Stop any active command.
+	mfrc522.PCD_WriteRegister(MFRC522::ComIrqReg, 0x7F);					// Clear all seven interrupt request bits
+	mfrc522.PCD_SetRegisterBitMask(MFRC522::FIFOLevelReg, 0x80);			// FlushBuffer = 1, FIFO initialization
+	mfrc522.PCD_WriteRegister(MFRC522::FIFODataReg, 1, &command);			// Write sendData to the FIFO
+	mfrc522.PCD_WriteRegister(MFRC522::BitFramingReg, validBits);			// Bit adjustments
+	mfrc522.PCD_WriteRegister(MFRC522::CommandReg, MFRC522::PCD_Transceive);				// Execute the command
+	mfrc522.PCD_SetRegisterBitMask(MFRC522::BitFramingReg, 0x80);			// StartSend=1, transmission of data starts
+
+	i = 10;
+	while (1) {
+		n = mfrc522.PCD_ReadRegister(MFRC522::ComIrqReg);	// ComIrqReg[7..0] bits are: Set1 TxIRq RxIRq IdleIRq HiAlertIRq LoAlertIRq ErrIRq TimerIRq
+		if (n & waitIRq) {					// One of the interrupts that signal success has been set.
+			break;
+		}
+		if (n & 0x01) {						// Timer interrupt - nothing received in 25ms
+			return false;
+		}
+		if (--i == 0) {						// The emergency break. If all other conditions fail we will eventually terminate on this one after 35.7ms. Communication with the MFRC522 might be down.
+			return false;
+		}
+	}
+
+	return true;
+}
+
 void loop() {
 	ticks++;
 
-	mfrc522.PCD_WriteRegister(mfrc522.CommandReg, mfrc522.PCD_NoCmdChange);
+	// the PCD_NoCmdChange not really needed as the reader is wakened up by the card
+	//mfrc522.PCD_WriteRegister(mfrc522.CommandReg, mfrc522.PCD_NoCmdChange);
+
+	//mfrc522_fastDetect3();
+	//mfrc522.PCD_WriteRegister(mfrc522.CommandReg, mfrc522.PCD_NoCmdChange | 0x10);
+	//LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF);
+	//return;
 
 	// Look for new cards
-	if (!mfrc522.PICC_IsNewCardPresent()) {
+	if(!mfrc522_fastDetect3()){
+	//if (!mfrc522.PICC_IsNewCardPresent()) {
 		// put NFC to sleep
 		mfrc522.PCD_WriteRegister(mfrc522.CommandReg, mfrc522.PCD_NoCmdChange | 0x10);
 		if (ticks > 24 * 60 * 60)
