@@ -80,7 +80,7 @@ bool sendtoESP(String cmd, String param)
 	digitalWrite(ESP_ENABLE_PIN, HIGH);
 	digitalWrite(LED_PIN, LOW);
 	Serial1.begin(19200);
-	// startecho();
+	//startecho();
 	// wait for the 'y' command for 2 seconds
 
 	simpleserial.setTimeout(200);
@@ -100,7 +100,7 @@ bool sendtoESP(String cmd, String param)
 
 	// ready to send command
 	simpleserial.sendCmd(cmd,param);
-
+	//startecho();
 	// get answer
 	Serial1.setTimeout(1000);
 	for (int i = 0; i < 5; i++)
@@ -268,8 +268,8 @@ void loop() {
 	//if (!mfrc522.PICC_IsNewCardPresent()) {
 		// put NFC to sleep
 		mfrc522.PCD_WriteRegister(mfrc522.CommandReg, mfrc522.PCD_NoCmdChange | 0x10);
-		if (ticks > 24 * 60 * 60)
-		//if (ticks > 10)
+//		if (ticks > 24 * 60 * 60)
+		if (false)
 		{
 			ticks = 0;
 			sendtoESP("b", measurepower());
@@ -278,7 +278,7 @@ void loop() {
 	else
 	{
 		bool status = mfrc522.PICC_ReadCardSerial();
-		Serial.println("got something");
+		//Serial.println("got something");
 		mfrc522.PCD_WriteRegister(mfrc522.CommandReg, mfrc522.PCD_NoCmdChange | 0x10);
 		if (status)
 		{

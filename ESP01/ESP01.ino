@@ -128,8 +128,10 @@ void SaveEeprom()
 
 bool configure_wifi(bool bForce) {
 	WiFiManager wifiManager;
-	wifiManager.setDebugOutput(false);
 	bool bRet;
+	WiFiClient client;
+
+	wifiManager.setDebugOutput(false);
 
 	if(bForce) wifiManager.resetSettings();
 
@@ -151,7 +153,6 @@ bool configure_wifi(bool bForce) {
 	eepromParams.bretry = true;
 
 	// check connection to pimusic
-	WiFiClient client;
 	if (!client.connect(eepromParams.host, 80)) {
 		return false;
 	}
