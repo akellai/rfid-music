@@ -7,6 +7,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RFID_ProMini", "RFID_ProMin
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ESP01", "ESP01\ESP01.vcxproj", "{17AC6866-75BB-47D7-8BC3-4CD6A803FE07}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ESP01_test", "ESP01_test\ESP01_test.vcxproj", "{F5E60321-B095-4E61-9CD9-5CD033DE12D1}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x86 = Debug|x86
@@ -21,6 +23,10 @@ Global
 		{17AC6866-75BB-47D7-8BC3-4CD6A803FE07}.Debug|x86.Build.0 = Debug|Win32
 		{17AC6866-75BB-47D7-8BC3-4CD6A803FE07}.Release|x86.ActiveCfg = Release|Win32
 		{17AC6866-75BB-47D7-8BC3-4CD6A803FE07}.Release|x86.Build.0 = Release|Win32
+		{F5E60321-B095-4E61-9CD9-5CD033DE12D1}.Debug|x86.ActiveCfg = Debug|Win32
+		{F5E60321-B095-4E61-9CD9-5CD033DE12D1}.Debug|x86.Build.0 = Debug|Win32
+		{F5E60321-B095-4E61-9CD9-5CD033DE12D1}.Release|x86.ActiveCfg = Release|Win32
+		{F5E60321-B095-4E61-9CD9-5CD033DE12D1}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
